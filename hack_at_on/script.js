@@ -1,86 +1,33 @@
 let sourceCoords = null;
 let destinationCoords = null;
-let osrmRoutes = [];
-let map, routeLayer = null;
-let poiLayer = null;
 
-// -------------------------------
-// MAP INIT
-// -------------------------------
+let routes = [];
+let map;
+let activeRouteLayer = null;
+
+/* ================= DEBUG ================= */
+function log(msg) {
+  const box = document.getElementById("debugBox");
+  box.textContent += msg + "\n";
+  box.scrollTop = box.scrollHeight;
+}
+
+/* ================= MAP ================= */
 function initMap() {
   map = L.map("map").setView([20.5937, 78.9629], 5);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+  log("🗺 Map initialized");
 }
 
-function resetScoreBox() {
+function updateScoreBox(route) {
   document.getElementById("poiScoreBox").textContent =
-    "POS POI: --\nNEG POI: --\nLIGHT : --";
+    `POS POI: ${route.features.pos_score.toFixed(2)}\n` +
+    `NEG POI: ${route.features.neg_score.toFixed(2)}\n` +
+    `LIGHT : ${route.features.light_score.toFixed(2)}\n` +
+    `SAFE  : ${route.safety_score.toFixed(2)}`;
 }
 
-// -------------------------------
-// RESET EVERYTHING
-// -------------------------------
-function resetRoutes() {
-  osrmRoutes = [];
-  document.getElementById("routes").innerHTML = "";
-  document.getElementById("routeCoordsBox").textContent = "";
-  document.getElementById("streetLightBox").textContent = "";
-  resetScoreBox();
-
-  if (routeLayer) map.removeLayer(routeLayer);
-  if (poiLayer) map.removeLayer(poiLayer);
-
-  routeLayer = null;
-  poiLayer = null;
-}
-
-// -------------------------------
-// WAYPOINTS
-// -------------------------------
-function generateWaypoints(src, dst) {
-  const mlat = (src.lat + dst.lat) / 2;
-  const mlon = (src.lon + dst.lon) / 2;
-  const o = 0.003;
-
-  return [
-    null,
-    { lat: mlat + o, lon: mlon },
-    { lat: mlat - o, lon: mlon },
-    { lat: mlat, lon: mlon + o },
-    { lat: mlat, lon: mlon - o }
-  ];
-}
-
-// -------------------------------
-// REMOVE LOOPS
-// -------------------------------
-function removeClosedLoops(coords) {
-  const seen = new Map();
-  const clean = [];
-
-  for (let c of coords) {
-    const key = `${c[0].toFixed(6)},${c[1].toFixed(6)}`;
-    if (seen.has(key)) clean.splice(seen.get(key));
-    seen.set(key, clean.length);
-    clean.push(c);
-  }
-  return clean;
-}
-
-// -------------------------------
-// NORMALIZE ROUTE
-// -------------------------------
-function normalizeRoute(coords) {
-  const step = Math.max(1, Math.floor(coords.length / 25));
-  return coords
-    .filter((_, i) => i % step === 0)
-    .map(c => `${c[0].toFixed(4)},${c[1].toFixed(4)}`)
-    .join("|");
-}
-
-// -------------------------------
-// AUTOCOMPLETE
-// -------------------------------
+/* ================= AUTOCOMPLETE ================= */
 function initAutocomplete() {
   initMap();
 
@@ -91,114 +38,204 @@ function initAutocomplete() {
     const p = s.getPlace();
     if (!p.geometry) return;
     sourceCoords = { lat: p.geometry.location.lat(), lon: p.geometry.location.lng() };
-    fetchRoutesFromOSRM();
+    log("📍 Source selected");
+    fetchAllRoutes();
   });
 
   d.addListener("place_changed", () => {
     const p = d.getPlace();
     if (!p.geometry) return;
     destinationCoords = { lat: p.geometry.location.lat(), lon: p.geometry.location.lng() };
-    fetchRoutesFromOSRM();
+    log("🏁 Destination selected");
+    fetchAllRoutes();
   });
 
-  document.getElementById("mode").addEventListener("change", fetchRoutesFromOSRM);
+  document.getElementById("mode").addEventListener("change", () => {
+    log("🔁 Mode changed");
+    fetchAllRoutes();
+  });
 }
 
-window.initAutocomplete = initAutocomplete;
+/* ================= RESET ================= */
+function resetAll() {
+  routes = [];
+  document.getElementById("routeList").innerHTML = "";
+  document.getElementById("debugBox").textContent = "";
 
-// -------------------------------
-// FETCH ROUTES
-// -------------------------------
-function fetchRoutesFromOSRM() {
+  if (activeRouteLayer) {
+    map.removeLayer(activeRouteLayer);
+    activeRouteLayer = null;
+  }
+}
+
+/* ================= WAYPOINT OFFSETS ================= */
+function generateWaypoints(src, dst) {
+  const mlat = (src.lat + dst.lat) / 2;
+  const mlon = (src.lon + dst.lon) / 2;
+  const o = 0.004; // ~400m offset
+
+  return [
+    null,
+    { lat: mlat + o, lon: mlon },
+    { lat: mlat - o, lon: mlon },
+    { lat: mlat, lon: mlon + o },
+    { lat: mlat, lon: mlon - o }
+  ];
+}
+
+/* ================= FETCH ROUTES ================= */
+async function fetchAllRoutes() {
   if (!sourceCoords || !destinationCoords) return;
 
-  resetRoutes();
+  resetAll();
+  log("🔄 Forcing multiple routes using waypoint offsets...");
 
   const mode = document.getElementById("mode").value;
   const waypoints = generateWaypoints(sourceCoords, destinationCoords);
-  const seenShapes = new Set();
+  const seen = new Set();
 
-  waypoints.forEach(wp => {
+  for (let i = 0; i < waypoints.length; i++) {
+    const wp = waypoints[i];
+
     const url = wp
-      ? `https://router.project-osrm.org/route/v1/${mode}/${sourceCoords.lon},${sourceCoords.lat};${wp.lon},${wp.lat};${destinationCoords.lon},${destinationCoords.lat}?overview=full&geometries=geojson`
-      : `https://router.project-osrm.org/route/v1/${mode}/${sourceCoords.lon},${sourceCoords.lat};${destinationCoords.lon},${destinationCoords.lat}?overview=full&geometries=geojson`;
+      ? `https://router.project-osrm.org/route/v1/${mode}/` +
+        `${sourceCoords.lon},${sourceCoords.lat};` +
+        `${wp.lon},${wp.lat};` +
+        `${destinationCoords.lon},${destinationCoords.lat}` +
+        `?overview=full&geometries=geojson`
+      : `https://router.project-osrm.org/route/v1/${mode}/` +
+        `${sourceCoords.lon},${sourceCoords.lat};` +
+        `${destinationCoords.lon},${destinationCoords.lat}` +
+        `?overview=full&geometries=geojson`;
 
-    fetch(url)
-      .then(r => r.json())
-      .then(d => {
-        if (!d.routes?.length) return;
+    const res = await fetch(url);
+    const data = await res.json();
 
-        const coords = removeClosedLoops(d.routes[0].geometry.coordinates);
-        const sig = normalizeRoute(coords);
+    if (!data.routes?.length) continue;
 
-        if (seenShapes.has(sig)) return;
-        seenShapes.add(sig);
+    const coords = data.routes[0].geometry.coordinates;
+    const sig = coords.length + "_" + coords[0][0].toFixed(4);
 
-        osrmRoutes.push({
-          coords,
-          distance: d.routes[0].distance
-        });
+    if (seen.has(sig)) {
+      log("⚠ Duplicate route skipped");
+      continue;
+    }
 
-        displayRouteButtons();
-      });
-  });
+    seen.add(sig);
+
+    routes.push({
+      index: routes.length,
+      coords,
+      distance: data.routes[0].distance
+    });
+
+    log(`✅ Route ${routes.length} forced`);
+  }
+
+  if (!routes.length) {
+    log("❌ No routes generated");
+    return;
+  }
+
+  await extractFeaturesSequential();
+  await runML();
+  renderButtons();
 }
 
-// -------------------------------
-// ROUTE BUTTONS
-// -------------------------------
-function displayRouteButtons() {
-  const div = document.getElementById("routes");
-  div.innerHTML = "<b>Select a route:</b><br>";
+/* ================= FEATURE EXTRACTION ================= */
+async function extractFeaturesSequential() {
+  log("🔍 Extracting route features...");
 
-  osrmRoutes.forEach((_, i) => {
-    const b = document.createElement("button");
-    b.textContent = `Route ${i + 1}`;
-    b.onclick = () => drawRoute(i);
-    div.appendChild(b);
-  });
+  for (let i = 0; i < routes.length; i++) {
+    const r = routes[i];
+    const latlngs = r.coords.map(c => [c[1], c[0]]);
+
+    const res = await fetch("http://localhost:5000/analyze_route", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ coords: latlngs })
+    });
+
+    const data = await res.json();
+    const km = r.distance / 1000;
+
+    const pos = 1 - Math.exp(-(data.positive_poi_count / km) / 6);
+    const neg = 1 - Math.exp(-(data.negative_poi_count / km) / 5);
+
+    r.features = {
+      pos_score: Math.min(1, pos),
+      neg_score: Math.min(1, neg),
+      light_score: data.lighting_score
+    };
+
+    log(
+      `📊 Route ${i + 1} → POS:${r.features.pos_score.toFixed(2)} ` +
+      `NEG:${r.features.neg_score.toFixed(2)} ` +
+      `LIGHT:${r.features.light_score.toFixed(2)}`
+    );
+  }
 }
 
-// -------------------------------
-// DRAW ROUTE + POI + LIGHT
-// -------------------------------
-function drawRoute(i) {
-  const r = osrmRoutes[i];
-  const latlngs = r.coords.map(c => [c[1], c[0]]);
+/* ================= ML ================= */
+async function runML() {
+  log("🧠 Running ML safety model...");
 
-  if (routeLayer) map.removeLayer(routeLayer);
-  if (poiLayer) map.removeLayer(poiLayer);
-
-  poiLayer = L.layerGroup().addTo(map);
-
-  routeLayer = L.polyline(latlngs, { color: "blue", weight: 5 }).addTo(map);
-  map.fitBounds(routeLayer.getBounds());
-
-  document.getElementById("routeCoordsBox").textContent =
-    `Route ${i + 1} Coordinates\n\n` +
-    latlngs.map((p, idx) => `${idx + 1}. ${p[0]}, ${p[1]}`).join("\n");
-
-  document.getElementById("streetLightBox").textContent =
-    "Fetching POI + lighting data...";
-
-  fetch("http://localhost:5000/analyze_route", {
+  const res = await fetch("http://localhost:5000/predict_routes", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ coords: latlngs })
-  })
-  .then(res => res.json())
-  .then(data => {
-    const routeKm = r.distance / 1000;
+    body: JSON.stringify({
+      routes: routes.map(r => ({
+        index: r.index,
+        ...r.features
+      }))
+    })
+  });
 
-    const posNorm = Math.min(1, data.positive_poi_count / (routeKm * 5));
-    const negNorm = Math.min(1, data.negative_poi_count / (routeKm * 5));
+  const ranked = await res.json();
 
-    document.getElementById("poiScoreBox").textContent =
-      `POS POI: ${posNorm.toFixed(2)}\n` +
-      `NEG POI: ${negNorm.toFixed(2)}\n` +
-      `LIGHT : ${data.lighting_score.toFixed(2)}`;
+  ranked.forEach(r => {
+    routes[r.index].safety_score = r.safety_score;
+  });
 
-    document.getElementById("streetLightBox").textContent =
-      `SUMMARY\nPositive: ${data.positive_poi_count}\nNegative: ${data.negative_poi_count}`;
+  routes.sort((a, b) => b.safety_score - a.safety_score);
+}
+
+/* ================= UI ================= */
+function routeColor(score) {
+  if (score >= 0.6) return "green";
+  if (score >= 0.33) return "orange";
+  return "red";
+}
+
+function renderButtons() {
+  log("🎨 Routes ready for selection");
+
+  const list = document.getElementById("routeList");
+  list.innerHTML = "";
+
+  routes.forEach((r, i) => {
+    const btn = document.createElement("button");
+    btn.textContent =
+      `Route ${i + 1} → ${routeColor(r.safety_score).toUpperCase()} (${r.safety_score.toFixed(2)})`;
+
+    btn.onclick = () => drawRoute(r);
+    list.appendChild(btn);
   });
 }
+
+/* ================= DRAW ================= */
+function drawRoute(route) {
+  if (activeRouteLayer) map.removeLayer(activeRouteLayer);
+
+  activeRouteLayer = L.polyline(
+    route.coords.map(c => [c[1], c[0]]),
+    { color: routeColor(route.safety_score), weight: 7 }
+  ).addTo(map);
+
+  map.fitBounds(activeRouteLayer.getBounds());
+  updateScoreBox(route);
+
+  log(`🗺 Displayed Route ${route.index + 1}`);
+}
+
+window.initAutocomplete = initAutocomplete;

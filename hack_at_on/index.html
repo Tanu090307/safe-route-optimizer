@@ -3,14 +3,27 @@
 <head>
   <title>Safe Route Selector</title>
 
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
 
   <style>
+    body {
+      background: #111;
+      color: #eee;
+      font-family: Arial, sans-serif;
+    }
+
     input, select {
-      width: 300px;
+      width: 320px;
       padding: 10px;
-      margin: 10px;
+      margin: 8px;
       font-size: 16px;
+      background: #222;
+      color: #fff;
+      border: 1px solid #555;
     }
 
     button {
@@ -18,33 +31,51 @@
       padding: 8px 12px;
       font-size: 14px;
       cursor: pointer;
+      background: #333;
+      color: #fff;
+      border: 1px solid #555;
+    }
+
+    button:hover {
+      background: #444;
     }
 
     #map {
-      height: 400px;
+      height: 420px;
       width: 100%;
-      margin-top: 20px;
+      margin-top: 15px;
+      border: 1px solid #444;
     }
 
     pre {
-      background: #f4f4f4;
+      background: #000;
+      color: #0f0;
       padding: 10px;
       white-space: pre-wrap;
-      height: 200px;
+      height: 180px;
       overflow: auto;
+      font-family: monospace;
+      border: 1px solid #333;
     }
 
+    /* TOP RIGHT SCORE BOX */
     #poiScoreBox {
       position: fixed;
       top: 10px;
       right: 10px;
-      background: #111;
+      background: #000;
       color: #00ff99;
       padding: 10px 14px;
       font-family: monospace;
       border-radius: 6px;
       z-index: 9999;
       white-space: pre;
+      border: 1px solid #00ff99;
+    }
+
+    /* ROUTE LIST */
+    #routeList {
+      margin-top: 10px;
     }
   </style>
 </head>
@@ -63,19 +94,30 @@
     <option value="cycling">Cycling</option>
   </select>
 
-  <div id="routes"></div>
+  <!-- ROUTE BUTTONS -->
+  <div id="routeList"></div>
+<div id="routeList"></div>
+<pre id="debugBox"></pre>
+
+  <!-- MAP -->
   <div id="map"></div>
 
+  <!-- DEBUG + SUMMARY -->
   <div style="display:flex; gap:10px; margin-top:10px;">
-    <pre id="routeCoordsBox" style="width:50%"></pre>
+    <pre id="debugBox" style="width:50%"></pre>
     <pre id="streetLightBox" style="width:50%"></pre>
   </div>
 
+  <!-- TOP RIGHT LIVE SCORES -->
   <div id="poiScoreBox">POS POI: --\nNEG POI: --\nLIGHT : --</div>
 
+  <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- YOUR SCRIPT -->
   <script src="script.js"></script>
 
+  <!-- Google Places API -->
   <script
     src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBEoI-H1gw0DDg-YZ1oMU8JQzw2VF5-gjY&libraries=places&callback=initAutocomplete"
     async defer>

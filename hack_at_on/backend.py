@@ -3,22 +3,24 @@ from flask_cors import CORS
 import googlemaps
 import rasterio
 import numpy as np
+import joblib
 
-# -------------------------------
-# Flask App
-# -------------------------------
 app = Flask(__name__)
 CORS(app)
 
 # -------------------------------
-# Google Maps Client
+# Load ML
 # -------------------------------
-gmaps = googlemaps.Client(
-    key="AIzaSyDXQLZRCndqHH_N_Axkjet29WWgjt948gc"
-)
+model = joblib.load("route_safety_model.pkl")
+scaler = joblib.load("route_safety_scaler.pkl")
 
 # -------------------------------
-# VIIRS DATASET
+# Google Maps
+# -------------------------------
+gmaps = googlemaps.Client(key="AIzaSyDXQLZRCndqHH_N_Axkjet29WWgjt948gc")
+
+# -------------------------------
+# VIIRS (OPEN ONCE)
 # -------------------------------
 VIIRS_FILE = r"C:\spider\hack_at_on\data\SVDNB_npp_20251001-20251031_75N060E_vcmslcfg_v10_c202511071000.avg_rade9h.tif"
 viirs_ds = rasterio.open(VIIRS_FILE)
@@ -27,117 +29,74 @@ def get_brightness(lat, lon):
     try:
         row, col = viirs_ds.index(lon, lat)
         val = viirs_ds.read(1)[row, col]
-        if np.isnan(val) or val < 0:
-            return 0.0
-        return float(val)
+        return float(val) if val > 0 and not np.isnan(val) else 0.0
     except:
         return 0.0
 
 def route_lighting_score(coords):
     values = []
     for lat, lon in coords[::10]:
-        values.append(get_brightness(lat, lon))
+        v = get_brightness(lat, lon)
+        if v > 0:
+            values.append(v)
 
     if not values:
         return 0.0
 
-    avg = np.mean(values)
-    return min(avg / 60.0, 1.0)
+    p75 = np.percentile(values, 75)
+    return min(p75 / 50.0, 1.0)
 
 # -------------------------------
-# POI Categories (24×7 assumption)
+# POI TYPES
 # -------------------------------
-POSITIVE_POIS = [
-    "police",
-    "hospital",
-    "fire_station",
-    "atm",
-    "gas_station",
-    "lodging"
-]
-
-NEGATIVE_POIS = [
-    "bar",
-    "night_club",
-    "liquor_store"
-]
+POSITIVE_POIS = ["police", "hospital", "fire_station", "atm", "gas_station"]
+NEGATIVE_POIS = ["bar", "night_club", "liquor_store"]
 
 # -------------------------------
-# API
+# ANALYZE ROUTE
 # -------------------------------
 @app.route("/analyze_route", methods=["POST"])
 def analyze_route():
-    data = request.get_json()
-    coords = data["coords"]
+    coords = request.json["coords"]  # MUST be [lat, lon]
 
-    positive_count = 0
-    negative_count = 0
-    poi_set = set()
-    poi_coords = []
+    pos, neg = 0, 0
+    seen = set()
 
-    sampled = coords[::10]
+    for lat, lon in coords[::20]:
+        for p in POSITIVE_POIS:
+            for r in gmaps.places_nearby(location=(lat, lon), radius=150, type=p).get("results", []):
+                if r["place_id"] not in seen:
+                    seen.add(r["place_id"])
+                    pos += 1
 
-    for lat, lon in sampled:
-
-        # POSITIVE POIs
-        for poi in POSITIVE_POIS:
-            res = gmaps.places_nearby(
-                location=(lat, lon),
-                radius=150,
-                type=poi
-            )
-
-            for p in res.get("results", []):
-                pid = p["place_id"]
-                if pid in poi_set:
-                    continue
-
-                poi_set.add(pid)
-                loc = p["geometry"]["location"]
-
-                poi_coords.append({
-                    "lat": loc["lat"],
-                    "lon": loc["lng"],
-                    "type": poi,
-                    "signal": "positive"
-                })
-                positive_count += 1
-
-        # NEGATIVE POIs
-        for poi in NEGATIVE_POIS:
-            res = gmaps.places_nearby(
-                location=(lat, lon),
-                radius=150,
-                type=poi
-            )
-
-            for p in res.get("results", []):
-                pid = p["place_id"]
-                if pid in poi_set:
-                    continue
-
-                poi_set.add(pid)
-                loc = p["geometry"]["location"]
-
-                poi_coords.append({
-                    "lat": loc["lat"],
-                    "lon": loc["lng"],
-                    "type": poi,
-                    "signal": "negative"
-                })
-                negative_count += 1
-
-    lighting_score = route_lighting_score(coords)
+        for p in NEGATIVE_POIS:
+            for r in gmaps.places_nearby(location=(lat, lon), radius=150, type=p).get("results", []):
+                if r["place_id"] not in seen:
+                    seen.add(r["place_id"])
+                    neg += 1
 
     return jsonify({
-        "positive_poi_count": positive_count,
-        "negative_poi_count": negative_count,
-        "poi_coords": poi_coords,
-        "lighting_score": lighting_score
+        "positive_poi_count": pos,
+        "negative_poi_count": neg,
+        "lighting_score": route_lighting_score(coords)
     })
 
 # -------------------------------
-# Run
+# ML PREDICTION
+# -------------------------------
+@app.route("/predict_routes", methods=["POST"])
+def predict_routes():
+    routes = request.json["routes"]
+
+    X = np.array([[r["pos_score"], r["neg_score"], r["light_score"]] for r in routes])
+    preds = model.predict(scaler.transform(X))
+
+    for i, p in enumerate(preds):
+        routes[i]["safety_score"] = float(p)
+
+    routes.sort(key=lambda r: r["safety_score"], reverse=True)
+    return jsonify(routes)
+
 # -------------------------------
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    app.run(port=5000, debug=True)
