@@ -63,3 +63,58 @@ All features are normalized to the range **0–1**.
 ## Machine Learning Model
 
 - **Input Features**
+[pos_score, neg_score, light_score]
+
+- **Output**
+safety_score ∈ [0, 1]
+
+
+- **Model Type**
+Regression (continuous scoring for ranking)
+
+- **Training Data**
+Synthetic but realistic urban route data
+
+---
+
+## Safety Classification
+
+| Safety Score | Category  | Color  |
+|-------------|-----------|--------|
+| ≥ 0.60      | Safe      | Green  |
+| 0.33–0.59   | Moderate  | Orange |
+| < 0.33      | Unsafe    | Red    |
+
+---
+
+## APIs and Data Sources
+
+### Google Cloud APIs (Billing Required)
+- Maps JavaScript API
+- Places API
+
+### External APIs
+- OSRM Routing API (public)
+
+### Offline Datasets
+- NASA VIIRS Night-Time Lights (GeoTIFF)
+
+---
+
+## Setup and Installation
+
+### Backend
+
+```bash
+pip install flask flask-cors googlemaps rasterio numpy joblib scikit-learn
+python backend.py
+
+http://localhost:5000
+
+- **Use Cases**
+
+- Night travel safety
+- Personal security applications
+- Smart city analytics
+- Emergency route planning
+- Research and hackathon projects
