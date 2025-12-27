@@ -17,7 +17,7 @@ scaler = joblib.load("route_safety_scaler.pkl")
 # -------------------------------
 # Google Maps
 # -------------------------------
-gmaps = googlemaps.Client(key="AIzaSyDXQLZRCndqHH_N_Axkjet29WWgjt948gc")
+gmaps = googlemaps.Client(key="api_key")
 
 # -------------------------------
 # VIIRS (OPEN ONCE)
