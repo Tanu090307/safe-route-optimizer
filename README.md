@@ -81,8 +81,8 @@ Synthetic but realistic urban route data
 
 | Safety Score | Category  | Color  |
 |-------------|-----------|--------|
-| ≥ 0.60      | Safe      | Green  |
-| 0.33–0.59   | Moderate  | Orange |
+| ≥ 0.66      | Safe      | Green  |
+| 0.33–0.66   | Moderate  | Orange |
 | < 0.33      | Unsafe    | Red    |
 
 ---
@@ -100,23 +100,3 @@ Synthetic but realistic urban route data
 - NASA VIIRS Night-Time Lights (GeoTIFF)
 
 ---
-
-## Setup and Installation
-
-### Backend
-
-```bash
-pip install flask flask-cors googlemaps rasterio numpy joblib scikit-learn
-python backend.py
-
-http://localhost:5000
-
----
-
-- **Use Cases**
-
-- Night travel safety
-- Personal security applications
-- Smart city analytics
-- Emergency route planning
-- Research and hackathon projects
